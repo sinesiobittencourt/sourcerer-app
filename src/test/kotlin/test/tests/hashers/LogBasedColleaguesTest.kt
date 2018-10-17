@@ -10,8 +10,10 @@ import org.jetbrains.spek.api.Spek
 import org.jetbrains.spek.api.dsl.given
 import org.jetbrains.spek.api.dsl.it
 import test.utils.TestRepo
+import java.io.File
 import java.util.*
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class LogBasedColleaguesTest : Spek({
     given("repo with a file inside") {
@@ -43,15 +45,17 @@ class LogBasedColleaguesTest : Spek({
                 (0, 1, 0).build().time)
 
         it("creates log file") {
+            val builder = ProcessBuilder()
+            builder.directory(File(testRepoPath))
             val log = LogBasedColleagues(serverRepo, testRepoPath, emails,
-                    hashSetOf(author1.email)).getLog(fileName, testRepoPath)
-            assert(log.contains("+line1") && log.contains("+line2"))
+                    hashSetOf(author1.email)).getLog(fileName, builder)
+            assertTrue(log.contains("+line1") && log.contains("+line2"))
         }
 
         it("extracts colleagues") {
             val stats = LogBasedColleagues(serverRepo, testRepoPath, emails,
                     hashSetOf(author2.email)).getColleagues()
-            assert(stats.containsKey(author1.email))
+            assertTrue(stats.containsKey(author1.email))
             assertEquals(1.0, stats[author1.email])
         }
 

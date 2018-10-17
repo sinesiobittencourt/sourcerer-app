@@ -107,10 +107,10 @@ class RepoHasher(private val api: Api,
                     userEmails).calculateAndSendFacts(api)
 
             val endTime = System.currentTimeMillis()
-            Logger.print("Hash took " + (hashEndTime - hashStartTime) + " " +
-                    "milliseconds")
-            Logger.print("Log based took " + (endTime - startTime) + " " +
-                    "milliseconds")
+
+            Logger.debug {"Hash took ${hashEndTime - hashStartTime} " +
+                    "milliseconds"}
+            Logger.debug {"Log based took ${endTime - startTime} milliseconds"}
 
             // Start and synchronously wait until all subscribers complete.
             Logger.print("Stats computation. May take a while...")

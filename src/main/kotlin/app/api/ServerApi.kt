@@ -218,5 +218,4 @@ class ServerApi (private val configurator: Configurator) : Api {
         return makeRequest(createRequestPostAuthorDistances(distances),
                 "postDistances", {})
     }
-
 }

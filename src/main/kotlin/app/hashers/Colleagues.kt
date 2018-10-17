@@ -19,9 +19,20 @@ class LogBasedColleagues(private val serverRepo: Repo,
                          private val repoPath: String,
                          private val emails: HashSet<String>,
                          private val userEmails: HashSet<String>) {
-    fun getLog(filePath: String, repoPath1: String): String {
-        val builder = ProcessBuilder()
-        builder.directory(File(repoPath1))
+    fun getFilesModified(email: String, builder: ProcessBuilder):
+            MutableSet<String> {
+        builder.command(listOf("git", "log", "--no-merges", "--author=$email", "--name-only",
+                "--pretty=format:\"\""))
+        val process = builder.start()
+        val log = process.inputStream.bufferedReader().lines().toList()
+                .joinToString("\n")
+        process.waitFor()
+
+        val paths = log.split("\n").filter {it.isNotEmpty() && it.length > 0 &&
+                it != "\"\""}.toMutableSet()
+        return paths
+    }
+    fun getLog(filePath: String, builder: ProcessBuilder): String {
         builder.command(listOf("git", "log", "-p", "-M", "--follow",
                 "--date=iso", "--", filePath))
         val process = builder.start()
@@ -43,11 +54,13 @@ class LogBasedColleagues(private val serverRepo: Repo,
     }
 
     fun findLast(line: String, substring: String): Int {
-        val substringRegex = Regex(substring)
+        val substringRegex = Regex.fromLiteral(substring)
+        return findLast(line, substringRegex)
+    }
+
+    fun findLast(line: String, substringRegex: Regex): Int {
         val result = substringRegex.findAll(line)
         if (result.toList().isEmpty()) {
-            println(line)
-            println(substring)
             return -1
         }
         val idx = result.last().range.first
@@ -55,12 +68,15 @@ class LogBasedColleagues(private val serverRepo: Repo,
     }
 
     fun getLineAuthor(line: String, log: String): Pair<String, Date>? {
-        val addedIdx = findLast(log, """\+$line""")
+        val addedIdx = findLast(log, "+$line")
         if (addedIdx < 0) {
-            println("Error in <$line>")
             return null
         }
-        val authorLineIdx = findLast(log.substring(0, addedIdx), "Author: ")
+
+        val authorLineIdx = findLast(log.substring(0, addedIdx), Regex("""Author: .+? <.+?>"""))
+        if (authorLineIdx < 0) {
+            return null
+        }
 
         val authorEmail = getAuthorEmail(log.substring(authorLineIdx))
         val authorTime = getAuthorTime(log.substring(authorLineIdx).split
@@ -71,7 +87,7 @@ class LogBasedColleagues(private val serverRepo: Repo,
     fun changedBy(line: String, logPiece: String): Pair<String, Date> {
         val deletedIdx = findLast(logPiece, "-$line")
         val changeAuthorIdx = findLast(logPiece.substring(0, deletedIdx),
-                "Author: ")
+                Regex("""Author: .+? <.+?>"""))
 
         val authorEmail = getAuthorEmail(logPiece.substring(changeAuthorIdx))
         val authorTime = getAuthorTime(logPiece.substring(changeAuthorIdx)
@@ -84,7 +100,7 @@ class LogBasedColleagues(private val serverRepo: Repo,
         val author2num = HashMap<String, Int>()
         emails.forEach { author2num[it] = 0 }
 
-        log.split("commit ").forEach {
+        log.split(Regex("commit [a-z0-9]{40}")).forEach {
             rawCommit ->
                 val rawList = rawCommit.split("\n")
                 if (rawCommit.isNotEmpty() && rawList.size >= 3) {
@@ -100,13 +116,11 @@ class LogBasedColleagues(private val serverRepo: Repo,
                         myDeleted.forEach { line ->
                             if (line.substring(1).isNotBlank() && line.length
                                     > 3) {
-                                println(line)
                                 val result = getLineAuthor(line.substring(1),
                                         log)
                                 if (result != null) {
                                     val res = TimeUnit.DAYS.convert(commitTime
                                             .time - result.second.time, TimeUnit.MILLISECONDS)
-                                    print(res)
                                     if (res < commitFrequency) {
                                         author2num[result.first] =
                                                 author2num[result.first]!! + 1
@@ -124,18 +138,26 @@ class LogBasedColleagues(private val serverRepo: Repo,
     fun getColleagues(): HashMap<String, Double> {
         val output = HashMap<String, Double>()
         emails.forEach { output[it] = 0.0 }
-        File(repoPath).walk().forEach { file ->
-            if (file.isFile) {
-                val log = getLog(file.absolutePath, repoPath)
-                userEmails.forEach { userEmail ->
-                    // TODO(lyaronskaya): explain commitFrequency value.
-                    val fileColleagues = onFile(log, userEmail, 120)
-                    fileColleagues.forEach { email, value ->
-                        output[email] = output[email]!! + value
-                    }
+
+        val builder = ProcessBuilder()
+        builder.directory(File(repoPath))
+
+        val filesModified = hashSetOf<String>()
+        emails.forEach {
+            filesModified.addAll(getFilesModified(it, builder))
+        }
+
+        filesModified.forEach { file ->
+            val log = getLog(file, builder)
+            userEmails.forEach { userEmail ->
+                // TODO(lyaronskaya): explain commitFrequency value.
+                val fileColleagues = onFile(log, userEmail, 120)
+                fileColleagues.forEach { email, value ->
+                    output[email] = output[email]!! + value
                 }
             }
         }
+
         return output
     }
 
