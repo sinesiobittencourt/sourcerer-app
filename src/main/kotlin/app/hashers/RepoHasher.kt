@@ -7,8 +7,6 @@ import app.BuildConfig
 import app.Logger
 import app.api.Api
 import app.config.Configurator
-import app.extractors.Extractor
-import app.extractors.Heuristics
 import app.model.Author
 import app.model.LocalRepo
 import app.model.ProcessEntry
@@ -79,7 +77,6 @@ class RepoHasher(private val api: Api,
                 jgitObservable, serverRepo)
 
             // Hash by all plugins.
-            val hashStartTime = System.currentTimeMillis()
             if (BuildConfig.COMMIT_HASHER_ENABLED) {
                 CommitHasher(serverRepo, api, rehashes, filteredEmails)
                     .updateFromObservable(observable, onError)
@@ -99,18 +96,10 @@ class RepoHasher(private val api: Api,
                                            commitsCount = commitsCount,
                                            userEmails = userEmail)
             }
-            val hashEndTime = System.currentTimeMillis()
-            val startTime = System.currentTimeMillis()
 
             val userEmails = configurator.getUser().emails.map { it.email }.toHashSet()
             LogBasedColleagues(serverRepo, localRepo.path, emails,
-                    userEmails).calculateAndSendFacts(api)
-
-            val endTime = System.currentTimeMillis()
-
-            Logger.debug {"Hash took ${hashEndTime - hashStartTime} " +
-                    "milliseconds"}
-            Logger.debug {"Log based took ${endTime - startTime} milliseconds"}
+                    userEmails).calculateAndSendDistances(api)
 
             // Start and synchronously wait until all subscribers complete.
             Logger.print("Stats computation. May take a while...")

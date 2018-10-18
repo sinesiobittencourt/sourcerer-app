@@ -6,8 +6,9 @@ package app.hashers
 import app.FactCodes
 import app.api.Api
 import app.model.Author
-import app.model.Fact
+import app.model.AuthorDistance
 import app.model.Repo
+import org.apache.http.auth.AUTH
 import java.io.File
 import kotlin.streams.toList
 import org.eclipse.jgit.util.GitDateParser
@@ -19,8 +20,7 @@ class LogBasedColleagues(private val serverRepo: Repo,
                          private val repoPath: String,
                          private val emails: HashSet<String>,
                          private val userEmails: HashSet<String>) {
-    fun getFilesModified(email: String, builder: ProcessBuilder):
-            MutableSet<String> {
+    fun getFilesModified(email: String, builder: ProcessBuilder): Set<String> {
         builder.command(listOf("git", "log", "--no-merges", "--author=$email", "--name-only",
                 "--pretty=format:\"\""))
         val process = builder.start()
@@ -29,8 +29,16 @@ class LogBasedColleagues(private val serverRepo: Repo,
         process.waitFor()
 
         val paths = log.split("\n").filter {it.isNotEmpty() && it.length > 0 &&
-                it != "\"\""}.toMutableSet()
-        return paths
+                it != "\"\""}
+
+        val sortedFiles = paths.groupingBy { it }.eachCount().toList()
+                .sortedByDescending { it.second }.map { it.first }
+        // Restrict for a very large number(>30) of modified files to 30% of it.
+        val numFilesSelected = minOf(sortedFiles.size, maxOf(10, (0.3 *
+                sortedFiles.size)
+                .toInt()))
+        val mostFrequentFiles = sortedFiles.subList(0, numFilesSelected).toSet()
+        return mostFrequentFiles
     }
     fun getLog(filePath: String, builder: ProcessBuilder): String {
         builder.command(listOf("git", "log", "-p", "-M", "--follow",
@@ -45,6 +53,9 @@ class LogBasedColleagues(private val serverRepo: Repo,
     fun getAuthorEmail(line: String): String {
         val startIdx = line.indexOf("<") + 1
         val endIdx = line.indexOf(">")
+        if (startIdx < 0 || endIdx < 0) {
+            return ""
+        }
         return line.substring(startIdx, endIdx)
     }
 
@@ -114,10 +125,13 @@ class LogBasedColleagues(private val serverRepo: Repo,
                         val myDeleted = data.filter { it.startsWith("-") &&
                                 !it.startsWith("--") }
                         myDeleted.forEach { line ->
-                            if (line.substring(1).isNotBlank() && line.length
+                            if (line.substring(1).trim().isNotBlank() && line.length
                                     > 3) {
-                                val result = getLineAuthor(line.substring(1),
-                                        log)
+                                val result = try {
+                                    getLineAuthor(line.substring(1), log)
+                                } catch (e: Throwable) {
+                                    null
+                                }
                                 if (result != null) {
                                     val res = TimeUnit.DAYS.convert(commitTime
                                             .time - result.second.time, TimeUnit.MILLISECONDS)
@@ -143,7 +157,7 @@ class LogBasedColleagues(private val serverRepo: Repo,
         builder.directory(File(repoPath))
 
         val filesModified = hashSetOf<String>()
-        emails.forEach {
+        userEmails.forEach {
             filesModified.addAll(getFilesModified(it, builder))
         }
 
@@ -157,22 +171,20 @@ class LogBasedColleagues(private val serverRepo: Repo,
                 }
             }
         }
-
         return output
     }
 
-    fun calculateAndSendFacts(api: Api) {
+    fun calculateAndSendDistances(api: Api) {
         val author2num = getColleagues()
-        val stats = mutableListOf<Fact>()
+        val stats = mutableListOf<AuthorDistance>()
         val author = Author(email = userEmails.toList()[0])
         author2num.forEach {anotherEmail, value ->
             if (anotherEmail !in userEmails) {
                 // TODO(lyaronskaya): send as AuthorDistance after testing.
-                stats.add(Fact(serverRepo, FactCodes.COLLEAGUES, value =
-                anotherEmail, value2 = value.toString(), author = author))
+                stats.add(AuthorDistance(serverRepo, anotherEmail, value))
             }
         }
-        api.postFacts(stats).onErrorThrow()
+        api.postAuthorDistances(stats).onErrorThrow()
     }
 }
 
